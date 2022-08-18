@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:anypoint-mq="http://www.mulesoft.org/schema/mule/anypoint-mq"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/anypoint-mq http://www.mulesoft.org/schema/mule/anypoint-mq/current/mule-anypoint-mq.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+	<anypoint-mq:config name="Anypoint_MQ_Config" doc:name="Anypoint MQ Config" doc:id="d7ea85d0-c2b9-41b0-b628-86936b2f6512" >
+		<anypoint-mq:connection url="https://mq-eu-west-2.anypoint.mulesoft.com/api/v1" clientId="123" clientSecret="123" />
+	</anypoint-mq:config>
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="d078818d-275e-462b-99ef-184348889465" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="974267ea-9d7f-465f-876a-a9824a8703a7" >
+		<http:request-connection host="0.0.0.0" port="8081" />
+	</http:request-config>
+	<anypoint-mq:circuit-breaker name="Circuit_breaker_http_time_out" tripTimeout="1" doc:name="Circuit breaker" doc:id="da56a14e-c812-4c28-a259-5b92f9fc38ba" errorsThreshold="2" tripTimeoutUnit="MINUTES" onErrorTypes="HTTP:BAD_GATEWAY, HTTP:CONNECTIVITY, HTTP:TIMEOUT,HTTP:SERVICE_UNAVAILABLE"/>
+	<flow name="circuite-breaker-pocFlow" doc:id="fb006ad0-75b9-45fe-8741-1d737633355b" >
+		<anypoint-mq:subscriber doc:name="Subscriber" doc:id="796da23f-dba0-4355-967c-fd17bd2df88e" config-ref="Anypoint_MQ_Config" destination="circuite-breaker-mq" >
+			<reconnect />
+		</anypoint-mq:subscriber>
+		<ee:transform doc:name="Transform Message" doc:id="3ea73801-b0ab-4671-8ce3-b98a5ba9e9a1" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="cust_id_var" ><![CDATA[%dw 2.0
+output application/json
+---
+payload.custId]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<http:request method="GET" doc:name="Request" doc:id="679a6755-4a74-4fcf-bb71-d67cc303b970" config-ref="HTTP_Request_configuration" path="/circuiteBreaker" sendCorrelationId="AUTO" correlationId="#[uuid()]"/>
+		<logger level="INFO" doc:name="Logger" doc:id="c1489231-0cc2-46a3-b4d5-793b5d011b0a" message="*************************************** request fired ***************************************"/>
+		<error-handler >
+			<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="2c415895-68be-4ecc-8cbd-d54efa75cd1a" >
+				<logger level="INFO" doc:name="Logger" doc:id="0d65c52b-f4a4-4418-b0f6-aae49b7796e6" message="#[error]"/>
+				<ee:transform doc:name="Transform Message" doc:id="2f2c5e5e-1154-4a5f-952f-88d7eb5fc8df" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+errorDetails: error.description,
+custId: vars.cust_id_var
+
+}
+]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<anypoint-mq:publish doc:name="Publish" doc:id="ab0af084-5ff2-4937-80bc-050cfb40c615" config-ref="Anypoint_MQ_Config" destination="httpErrors-q"/>
+			</on-error-continue>
+		</error-handler>
+	</flow>
+	<flow name="sub-error-succes-msg" doc:id="3a7ec4f0-ff0b-4cd7-a918-b3dfc855b06e" >
+		<anypoint-mq:subscriber doc:name="Subscriber" doc:id="54774f92-6915-4f7d-8483-c1726e0e3dba" config-ref="Anypoint_MQ_Config" destination="httpErrors-q"/>
+		<logger level="INFO" doc:name="Logger" doc:id="4328b3cc-ae74-4d13-9975-a681ed522648" message="#[payload]"/>
+	</flow>
+	<flow doc:id="c3a8e090-e76d-4e4d-a83e-7eebad0cd941" initialState="stopped" name="circuite-breaker-pocFlow1">
+		<http:listener doc:name="Listener" doc:id="61c38cc3-ac56-48e9-87b0-c82a3f23e699" config-ref="HTTP_Listener_config" path="/circuiteBreaker"/>
+		<ee:transform doc:name="Transform Message" doc:id="182e1662-0614-4475-a9db-5fe1f5f0f6ae" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	
+	"statusCode": "200",
+    "status": "Success"
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="6efed63b-c351-4afe-8100-ae43814531c6" message="#[payload]"/>
+	</flow>
+</mule>
